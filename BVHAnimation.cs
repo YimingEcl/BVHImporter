@@ -5,19 +5,18 @@ using UnityEditor;
 
 public class BVHAnimation : MonoBehaviour
 {
-    public string fileName;
-    public string bvhPrefix;
-    //public Animator myAnimator;
+    public string file;
+    public string prefix;
     private AnimationClip myClip;
     public Remap[] remap = null;
 
-    private Dictionary<string, string> nameMap;
+    private Dictionary<string, Transform> nameMap;
     private Transform rootTransform;
-    private Transform targetTransform;
     private int frames;
     private int frameRate;
     private Animation anim;
     private string path;
+    private bool isRead = false;
     Keyframe[][] keyframes;
 
     public BVHImporter bi;
@@ -26,65 +25,80 @@ public class BVHAnimation : MonoBehaviour
     public struct Remap
     {
         public string bvhName;
-        public string targetName;
+        public Transform targetTransform;
     }
 
     public void Read()
     {
-        bi = new BVHImporter(fileName);
-        bi.bvhPrefix = this.bvhPrefix;
+        if(file == string.Empty)
+            throw new InvalidOperationException("File cannot be empty!");
+        bi = new BVHImporter("Assets\\" + file);
         bi.read();
         this.frames = bi.frames;
         this.frameRate = bi.frameRate;
-        Debug.Log("Read Successfuly!");
+        this.isRead = true;
+        this.rootTransform = this.transform;
     }
 
-    public void Start()
+    public void CreateClip()
     {
-        bi = new BVHImporter(fileName);
-        bi.bvhPrefix = this.bvhPrefix;
-        bi.read();
-        this.frames = bi.frames;
-        this.frameRate = bi.frameRate;
-        nameMap = new Dictionary<string, string>();
+        Read();
+
+        nameMap = new Dictionary<string, Transform>();
 
         for (int i = 0; i < remap.Length; i++)
         {
-            if(remap[i].targetName != string.Empty)
+            if (remap[i].targetTransform != null)
             {
-                nameMap.Add(remap[i].bvhName, remap[i].targetName);
+                nameMap.Add(remap[i].bvhName, remap[i].targetTransform);
             }
         }
 
-        //myAnimator = GetComponent<Animator>();
-        anim = GetComponent<Animation>();
-
-        rootTransform = this.transform;
-
         myClip = new AnimationClip();
-        myClip.name = "TestAnimation";
+        myClip.name = "MyAnimation";
         myClip.legacy = true;
 
         for (int i = 0; i < bi.boneList.Count; i++)
         {
             BVHImporter.Bone bone = bi.boneList[i];
             string bvhName = bone.name;
-            if(!nameMap.ContainsKey(bvhName))
+            if (!nameMap.ContainsKey(bvhName))
             {
                 continue;
             }
             else
             {
-                string targetName = nameMap[bvhName];
-                Transform targetTransform = SearchTarget(rootTransform, targetName);
+                Transform targetTransform = nameMap[bvhName];
                 path = GetRelativePath(rootTransform, targetTransform);
                 SetCurve(bone, targetTransform);
             }
         }
 
         myClip.EnsureQuaternionContinuity();
+    }
+
+    public void Save(string name)
+    {
+        CreateClip();
+
+        AssetDatabase.CreateAsset(myClip, "Assets\\" + name + ".anim");
+        AssetDatabase.SaveAssets();
+
+        Debug.Log("Save in Assets Successfully!");
+    }
+
+    public void Play()
+    {
+        CreateClip();
+
+        anim = GetComponent<Animation>();
         anim.AddClip(myClip, myClip.name);
         anim.Play(myClip.name);
+    }
+
+    public void Start()
+    {
+        Play();
     }
 
     private void SetCurve(BVHImporter.Bone bone, Transform targetTransform)
@@ -291,41 +305,66 @@ public class BVHAnimation : MonoBehaviour
     }
 
     [CustomEditor(typeof(BVHAnimation))]
-    public class TestAnimatorEditor : Editor
+    public class BVHAnimationEditor : Editor
     {
+        public BVHAnimation Target;
+
+        private string savedName = string.Empty;
+
+        private void Awake()
+        {
+            Target = (BVHAnimation)target;
+        }
         public override void OnInspectorGUI()
         {
             DrawDefaultInspector();
 
-            BVHAnimation bvhAnim = (BVHAnimation)target;
-
             if (GUILayout.Button("Read"))
             {
-                bvhAnim.Read();
+                Target.Read();
+                Target.remap = new BVHAnimation.Remap[Target.bi.getCount()];
+                for (int i = 0; i < Target.bi.getCount(); i++)
+                {
+                    string boneName = Target.bi.boneList[i].name;
+                    Target.remap[i].bvhName = boneName;
+                    Target.remap[i].targetTransform = null;
+                }
+
+                if (Target.isRead)
+                    Debug.Log("Read Successfully!");
             }
 
-            if (GUILayout.Button("Remap"))
+            if(GUILayout.Button("AutoMap"))
             {
-                bvhAnim.remap = new BVHAnimation.Remap[bvhAnim.bi.getCount() - 1];
-                for (int i = 0; i < bvhAnim.bi.getCount() - 1; i++)
-                {
-                    string boneName = bvhAnim.bi.boneList[i].name;
-                    if(boneName.Contains("LeftHand") || boneName.Contains("RightHand"))
-                    {
-                        if(boneName == "LeftHand" && boneName == "RightHand")
-                        {
-                            bvhAnim.remap[i].bvhName = boneName;
-                            bvhAnim.remap[i].targetName = string.Empty;
-                        }
-                        else
-                        {
-                            bvhAnim.remap[i].bvhName = "Ignore";
-                            bvhAnim.remap[i].targetName = "Ignore";
-                        }
-                    }
-                    bvhAnim.remap[i].bvhName = boneName;
-                    bvhAnim.remap[i].targetName = string.Empty;
-                }
+                if (!Target.isRead)
+                    throw new InvalidOperationException("Read file first!");
+
+                AutoMap(Target);
+            }
+
+            savedName = EditorGUILayout.TextField("Saved Name: ", savedName);
+
+            if (GUILayout.Button("Save"))
+            {
+                if (savedName == string.Empty)
+                    throw new InvalidOperationException("Saved file name cannot be empty!");
+                Target.Save(savedName);
+            }
+        }
+
+        private void AutoMap(BVHAnimation Target)
+        {
+            string prefix = Target.prefix;
+            Transform root = Target.rootTransform;
+
+            for (int i = 0; i < Target.bi.getCount(); i++)
+            {
+                string boneName = prefix + Target.remap[i].bvhName;
+                Transform target = Target.SearchTarget(root, boneName);
+                if (target != null)
+                    Target.remap[i].targetTransform = target;
+                else
+                    Debug.Log("Bone not found for joint " + boneName + ".");
             }
         }
     }

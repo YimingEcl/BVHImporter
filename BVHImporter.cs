@@ -10,7 +10,6 @@ public class BVHImporter
 	public int frames;
 	public float frameTime;
 	public int frameRate;
-	public string bvhPrefix;
 	private List<float[]> motions;
 	private char[] space = new char[] { ' ', '\t', '\n', '\r' };
 
@@ -69,7 +68,7 @@ public class BVHImporter
 				{
 					parent = "None";
 					name = entries[entry + 1];
-					name = fixedName(name, bvhPrefix);
+					name = fixedName(name);
 					boneList.Add(new Bone(name, parent));
 					break;
 				}
@@ -77,7 +76,7 @@ public class BVHImporter
 				{
 					parent = name;
 					name = entries[entry + 1];
-					name = fixedName(name, bvhPrefix);
+					name = fixedName(name);
 					boneList.Add(new Bone(name, parent));
 					break;
 				}
@@ -217,9 +216,9 @@ public class BVHImporter
 		return boneList.Find(x => x.name == name);
 	}
 
-	public string fixedName(string str, string prefix)
+	public string fixedName(string str)
 	{
-		char option = '_';
+		char[] option = { '_', ':' };
 		string[] name = str.Split(option);
 		return name[name.Length - 1];
 	}
